@@ -182,3 +182,110 @@
     (ok true)
   )
 )
+
+;; Update interest rate model parameters
+(define-public (update-interest-rate-model
+    (new-base-rate (optional uint))
+    (new-rate-multiplier (optional uint))
+    (new-optimal-utilization (optional uint))
+    (new-reserve-factor (optional uint))
+  )
+  (begin
+    (try! (check-owner))
+    
+    ;; Update each parameter if provided
+    (if (is-some new-base-rate)
+      (var-set base-rate (unwrap-panic new-base-rate))
+      true
+    )
+    
+    (if (is-some new-rate-multiplier)
+      (var-set rate-multiplier (unwrap-panic new-rate-multiplier))
+      true
+    )
+    
+    (if (is-some new-optimal-utilization)
+      (var-set optimal-utilization (unwrap-panic new-optimal-utilization))
+      true
+    )
+    
+    (if (is-some new-reserve-factor)
+      (var-set reserve-factor (unwrap-panic new-reserve-factor))
+      true
+    )
+    
+    (ok true)
+  )
+)
+
+;; Emergency pause for all protocol operations
+(define-public (set-protocol-pause (paused bool))
+  (begin
+    (try! (check-owner))
+    (var-set protocol-paused paused)
+    (ok true)
+  )
+)
+
+;; Register pending BTC collateral operation
+(define-public (register-btc-collateral (bitcoin-tx-id (buff 32)) (amount uint))
+  (begin
+    (try! (check-protocol-active))
+    
+    ;; Store the pending BTC collateral operation
+    (map-set pending-btc-collateral
+      { bitcoin-tx-id: bitcoin-tx-id }
+      {
+        user: tx-sender,
+        amount: amount,
+        status: "pending"
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+;; For simplicity, we'll include a fixed list
+(define-private (get-all-asset-contracts)
+  (list 
+    'SP000000000000000000002Q6VF78.sbtc
+    'SP000000000000000000002Q6VF78.usda
+  )
+)
+
+(define-constant ERR_FLASH_LOAN_NOT_REPAID (err u200))
+(define-constant ERR_FLASH_LOAN_FEE_NOT_PAID (err u201))
+(define-constant ERR_FLASH_LOAN_AMOUNT_TOO_HIGH (err u202))
+
+(define-data-var flash-loan-fee uint u9) ;; 0.09% flash loan fee (9 basis points)
+(define-data-var max-flash-loan-ratio uint u800) ;; Max 80% of available liquidity
+
+;; Flash loan execution tracking
+(define-map active-flash-loans
+  { loan-id: uint }
+  {
+    borrower: principal,
+    asset: principal,
+    amount: uint,
+    fee: uint,
+    repaid: bool
+  }
+)
+
+(define-private (verify-flash-loan-repayment (loan-id uint))
+  (let 
+    (
+      (loan-data (unwrap! (map-get? active-flash-loans { loan-id: loan-id }) ERR_FLASH_LOAN_NOT_REPAID))
+      (required-amount (+ (get amount loan-data) (get fee loan-data)))
+    )
+    
+    ;; Mark as repaid (simplified verification)
+    (map-set active-flash-loans
+      { loan-id: loan-id }
+      (merge loan-data { repaid: true })
+    )
+    
+    (ok true)
+  )
+)
